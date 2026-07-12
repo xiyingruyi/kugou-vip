@@ -1,0 +1,13 @@
+{
+  "name": "我的个人插件源",
+  "homepage": "https://github.com/xiyingruyi/kugou-vip",
+  "plugins": [
+    {
+      "id": "echo-auto-vip",
+      "path": "echo-auto-vip",
+      "repo": "https://github.com/xiyingruyi/kugou-vip",
+      "homepage": "https://github.com/xiyingruyi/kugou-vip/tree/main/echo-auto-vip",
+      "tags": ["automation", "vip"]
+    }
+  ]
+}
