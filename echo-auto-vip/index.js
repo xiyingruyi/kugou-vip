@@ -40,8 +40,15 @@ export function activate(ctx) {
     return local.toISOString().split("T")[0];
   };
 
+  let hasRunThisSession = false;
+
   const doClaim = async (isManual = false) => {
     if (claiming.value) return;
+    if (!isManual && hasRunThisSession) {
+      addLog("本会话已执行过，跳过自动执行。");
+      return;
+    }
+    hasRunThisSession = true;
     claiming.value = true;
     
     if (isManual) {
