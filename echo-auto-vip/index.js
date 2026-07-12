@@ -16,7 +16,7 @@ export function activate(ctx) {
 
   const getServerToday = async () => {
     try {
-      const res = await ctx.kugou.getServerNow();
+      const res = await ctx.kugou.user.getServerNow();
       if (res && typeof res === "object") {
         const source = res.data && typeof res.data === "object" ? res.data : res;
         const candidates = [source.now, source.time, source.timestamp, source.server_time, source.serverTime];
@@ -61,7 +61,7 @@ export function activate(ctx) {
 
       // 1. 尝试领取畅听VIP
       try {
-        const tvipRes = await ctx.kugou.claimDayVip(today);
+        const tvipRes = await ctx.kugou.user.claimDayVip(today);
         if (tvipRes && tvipRes.status === 1) {
           success = true;
           addLog("🎉 畅听会员自动领取成功！");
@@ -75,7 +75,7 @@ export function activate(ctx) {
 
       // 2. 尝试升级概念VIP
       try {
-        const svipRes = await ctx.kugou.upgradeDayVip();
+        const svipRes = await ctx.kugou.user.upgradeDayVip();
         if (svipRes && svipRes.status === 1) {
           success = true;
           addLog("🚀 概念会员自动升级成功！");
@@ -90,8 +90,8 @@ export function activate(ctx) {
       // 3. 如果成功，刷新用户信息
       if (success) {
         try {
-          await ctx.kugou.getUserDetail();
-          await ctx.kugou.getUserVipDetail();
+          await ctx.kugou.user.getUserDetail();
+          await ctx.kugou.user.getUserVipDetail();
           addLog("已刷新用户VIP信息");
         } catch (e) {
           addLog("刷新用户信息失败");
