@@ -80,6 +80,12 @@ export function activate(ctx) {
         addLog(`畅听会员领取请求失败或已领取: ${e.message}`);
       }
 
+      // 【关键修复】增加延时，给酷狗服务器同步状态的时间
+      if (!isManual) {
+        addLog("等待2秒同步服务器状态...");
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+
       // 2. 尝试升级概念VIP
       try {
         const svipRes = await ctx.kugou.user.upgradeDayVip();
@@ -144,8 +150,31 @@ export function activate(ctx) {
     });
   }
 
-  // 延迟5秒执行，等待主程序完成初始化和用户登录态恢复
-  setTimeout(() => {
-    doClaim(false);
-  }, 5000);
+  // 【关键修复】优化启动执行逻辑，等待登录态就绪而不是死板的5秒
+  const initAutoClaim = async () => {
+    let isReady = false;
+    // 尝试最多等待 15 秒
+    for (let i = 0; i < 5; i++) {
+      try {
+        // 通过调用 getUserDetail 测试登录态是否就绪
+        const res = await ctx.kugou.user.getUserDetail();
+        if (res && res.status === 1) {
+          isReady = true;
+          break;
+        }
+      } catch (e) {
+        // 尚未登录或报错，继续等待
+      }
+      await new Promise(resolve => setTimeout(resolve, 3000));
+    }
+    
+    // 如果就绪，执行领取
+    if (isReady) {
+      doClaim(false);
+    } else {
+      addLog("未检测到登录态，自动领取已取消。请在登录后手动领取。");
+    }
+  };
+
+  initAutoClaim();
 }
