@@ -80,6 +80,13 @@ export function activate(ctx) {
     return /已领|已经领|重复|今天|今日|无需|已是|已升级|already|duplicate/i.test(String(msg));
   };
 
+  // 502 判定：实机验证（已领取状态下重复领，领+升双双 502，而查询接口正常），
+  // 故“查询正常 + 写接口 502”视为重复领取；查询也挂则视为真故障，继续重试。
+  const is502 = (msg) => {
+    if (!msg) return false;
+    return /(^|[^0-9])502([^0-9]|$)|bad gateway/i.test(String(msg));
+  };
+
   const sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); timers.push(t); });
 
   const doClaim = async (isManual = false, reason = "") => {
@@ -104,8 +111,10 @@ export function activate(ctx) {
 
       let dayVipOk = state.dayVip;
       let conceptOk = state.concept;
+      let claimHit502 = false;
+      let upgradeHit502 = false;
 
-      // 1. 领取畅听VIP（幂等：成功或“已领取”都算过）
+      // 1. 领取畅听VIP（幂等：成功或“已领取”都算过；502 记下来，本轮末统一判定）
       if (!dayVipOk) {
         try {
           const tvipRes = await ctx.kugou.user.claimDayVip(today);
@@ -118,6 +127,9 @@ export function activate(ctx) {
             if (looksAlreadyClaimed(m)) {
               dayVipOk = true;
               addLog(`畅听会员今日已领过（${m || tvipRes.error_code || tvipRes.code}），视为通过`);
+            } else if (is502(m) || is502(tvipRes.error_code) || is502(tvipRes.code)) {
+              claimHit502 = true;
+              addLog("畅听会员领取返回 502（稍后统一判定是否为重复领取）");
             } else {
               addLog(`畅听会员返回：${JSON.stringify(tvipRes).slice(0, 200)}`);
             }
@@ -128,6 +140,9 @@ export function activate(ctx) {
           if (looksAlreadyClaimed(e && e.message)) {
             dayVipOk = true;
             addLog(`畅听会员已领过（${e.message}），视为通过`);
+          } else if (is502(e && e.message)) {
+            claimHit502 = true;
+            addLog("畅听会员领取请求 502（稍后统一判定是否为重复领取）");
           } else {
             addLog(`畅听会员领取请求失败（稍后会自动重试）: ${e.message}`);
           }
@@ -159,6 +174,7 @@ export function activate(ctx) {
               addLog(`概念会员今日已是最新（${m}），视为通过`);
               break;
             }
+            if (is502(m)) { upgradeHit502 = true; }
             addLog(`概念会员升级第 ${i}/${maxAttempts} 次未成功：${JSON.stringify(svipRes).slice(0, 200)}，${i < maxAttempts ? "1秒后重试" : "本轮结束"}`);
           } catch (e) {
             if (looksAlreadyClaimed(e && e.message)) {
@@ -166,12 +182,31 @@ export function activate(ctx) {
               addLog(`概念会员已是最新（${e.message}），视为通过`);
               break;
             }
+            if (is502(e && e.message)) { upgradeHit502 = true; }
             addLog(`概念会员升级第 ${i}/${maxAttempts} 次异常：${e.message}，${i < maxAttempts ? "1秒后重试" : "本轮结束"}`);
           }
           if (!conceptOk && i < maxAttempts) await sleep(1200);
         }
       } else {
         addLog("概念会员今日已标记成功，跳过。");
+      }
+
+      // 3.5 502 统一判定：领接口 502 且（升成功 或 升也 502）时，用查询接口验一下。
+      // 查询正常（登录态 ok、服务器可达）→ 说明只是重复领取被顶回 502，视为今日已完成；
+      // 查询也挂 → 真故障，继续按原逻辑重试。
+      if (!dayVipOk && claimHit502 && (conceptOk || upgradeHit502)) {
+        try {
+          const probe = await ctx.kugou.user.getUserDetail();
+          if (probe && probe.status === 1) {
+            dayVipOk = true;
+            if (!conceptOk && upgradeHit502) conceptOk = true;
+            addLog("查询正常但领取接口 502，判定为今日已领取（重复领取），标记完成 ✅");
+          } else {
+            addLog("领取接口 502，且登录探活未通过，视为真故障，继续补领");
+          }
+        } catch (e) {
+          addLog("领取接口 502，且查询接口也失败，视为真故障，继续补领");
+        }
       }
 
       // 4. 成功则刷新用户信息 + 持久化今日状态
@@ -296,7 +331,7 @@ export function activate(ctx) {
       return () => h("div", { style: "display: grid; gap: 12px;" }, [
         h("p", { style: "color: var(--color-text-secondary); font-size: 14px;" }, "启动后自动领取畅听会员并升级概念会员。支持登录延迟、路由切换、个人面板打开、定时多轮补领；今日完成后自动停止，手动按钮随时可用。"),
         h("p", { style: "font-size: 13px;" }, `状态：${statusText.value}`),
-        h("div", { style: "display: flex; align-items: center; gap: 12px; flex-wrap: wrap;" }, [
+        h("div", { style: "display: flex; align-items: center; gap: 12px;" }, [
           Button ? h(Button, {
             onClick: () => doClaim(true),
             loading: claiming.value
@@ -305,16 +340,6 @@ export function activate(ctx) {
             disabled: claiming.value,
             style: "padding: 6px 12px; background: var(--color-primary); color: white; border: none; border-radius: 4px; cursor: pointer;"
           }, "立即手动领取"),
-          h("button", {
-            onClick: async () => {
-              const today = await getServerToday();
-              await saveState({ date: today, dayVip: true, concept: true, done: true });
-              statusText.value = "今日已完成 ✅";
-              addLog("已手动标记今日完成，不再补领。");
-              stopAutoLoop("手动标记今日完成");
-            },
-            style: "padding: 6px 12px; background: transparent; border: 1px solid var(--color-border, #ccc); border-radius: 4px; cursor: pointer;"
-          }, "今日已领过，别再试了"),
         ]),
         h("div", {
           style: "background: var(--color-surface-variant); padding: 12px; border-radius: 8px; font-family: monospace; font-size: 12px; max-height: 200px; overflow-y: auto; white-space: pre-wrap;"

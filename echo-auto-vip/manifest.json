@@ -1,7 +1,7 @@
 {
   "id": "echo-auto-vip",
   "name": "自动领取会员",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "启动后自动领取畅听会员并升级概念会员，支持登录延迟与多轮补领。",
   "author": "wangxin",
   "main": "index.js",
