@@ -296,7 +296,7 @@ export function activate(ctx) {
       return () => h("div", { style: "display: grid; gap: 12px;" }, [
         h("p", { style: "color: var(--color-text-secondary); font-size: 14px;" }, "启动后自动领取畅听会员并升级概念会员。支持登录延迟、路由切换、个人面板打开、定时多轮补领；今日完成后自动停止，手动按钮随时可用。"),
         h("p", { style: "font-size: 13px;" }, `状态：${statusText.value}`),
-        h("div", { style: "display: flex; align-items: center; gap: 12px;" }, [
+        h("div", { style: "display: flex; align-items: center; gap: 12px; flex-wrap: wrap;" }, [
           Button ? h(Button, {
             onClick: () => doClaim(true),
             loading: claiming.value
@@ -305,6 +305,16 @@ export function activate(ctx) {
             disabled: claiming.value,
             style: "padding: 6px 12px; background: var(--color-primary); color: white; border: none; border-radius: 4px; cursor: pointer;"
           }, "立即手动领取"),
+          h("button", {
+            onClick: async () => {
+              const today = await getServerToday();
+              await saveState({ date: today, dayVip: true, concept: true, done: true });
+              statusText.value = "今日已完成 ✅";
+              addLog("已手动标记今日完成，不再补领。");
+              stopAutoLoop("手动标记今日完成");
+            },
+            style: "padding: 6px 12px; background: transparent; border: 1px solid var(--color-border, #ccc); border-radius: 4px; cursor: pointer;"
+          }, "今日已领过，别再试了"),
         ]),
         h("div", {
           style: "background: var(--color-surface-variant); padding: 12px; border-radius: 8px; font-family: monospace; font-size: 12px; max-height: 200px; overflow-y: auto; white-space: pre-wrap;"
